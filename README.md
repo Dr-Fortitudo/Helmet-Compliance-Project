@@ -1,16 +1,15 @@
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi-lightgrey)
 ![YOLO](https://img.shields.io/badge/ObjectDetection-YOLOv5-yellow)
-![License](https://img.shields.io/badge/License-MIT-green)
 
 ## 🪖 Helmet Compliance Detection 🚨  
 Keeping heads safe, one pixel at a time!
 
 This project uses the power of YOLO object detection and a Raspberry Pi 4B to make sure workers are actually wearing helmets — not just claiming to. Snapshots are taken every 10 seconds, and violators are caught red-headed (well, helmet-less).
 
-🔍 No Helmet? Sirens wail.
-📸 Caught in 4K? Image saved with timestamp.
-✅ Wearing one? You’re good to go.
+> 🔍 No Helmet? Sirens wail.  
+> 📸 Caught in 4K? Image saved with timestamp.  
+> ✅ Wearing one? You’re good to go.
 
 ### 🛠 Tech Stack
 - Raspberry Pi 4B 🥧  
