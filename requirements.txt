@@ -1,0 +1,7 @@
+streamlit>=1.26.0
+opencv-python-headless
+onnxruntime
+numpy
+pandas
+Pillow
+playsound
