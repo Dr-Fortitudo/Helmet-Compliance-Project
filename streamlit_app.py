@@ -8,8 +8,6 @@ import onnxruntime as ort
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import pandas as pd
-from playsound import playsound
-import threading
 import base64
 import zipfile
 
@@ -60,7 +58,7 @@ def postprocess(outputs, threshold=0.3):
 
 # Play alarm using threading
 def play_alarm():
-    threading.Thread(target=playsound, args=(ALARM_PATH,), daemon=True).start()
+    st.warning("🚨 Violation detected! (Sound not supported on cloud)")
 
 # Sidebar UI
 st.sidebar.image(LOGO_PATH, use_container_width=True)
