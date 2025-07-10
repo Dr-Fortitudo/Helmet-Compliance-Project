@@ -4,4 +4,3 @@ onnxruntime
 numpy
 pandas
 Pillow
-playsound
