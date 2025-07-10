@@ -11,6 +11,7 @@ import pandas as pd
 from playsound import playsound
 import threading
 import base64
+import zipfile
 
 # Config
 st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", layout="wide")
@@ -20,6 +21,15 @@ MODEL_PATH = "best.onnx"
 LOGO_PATH = "logo.png"
 ALARM_PATH = "alarm.mp3"
 LABELS = ["NO Helmet", "ON. Helmet"]
+
+# Constants
+MODEL_ZIP_PATH = "best.zip"
+MODEL_EXTRACTED_PATH = "best.onnx"
+
+# Unzip model if not already extracted
+if not os.path.exists(MODEL_EXTRACTED_PATH):
+    with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
+        zip_ref.extractall(".")  # Extract in current directory
 
 # Load model
 @st.cache_resource
