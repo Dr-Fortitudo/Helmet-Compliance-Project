@@ -15,8 +15,15 @@ st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", la
 
 # Constants
 MODEL_PATH = "best.onnx"
+MODEL_ZIP_PATH = "best.zip"
 LOGO_PATH = "logo.png"
 LABELS = ["NO Helmet", "ON. Helmet"]
+
+
+# Unzip model if not already extracted
+if not os.path.exists(MODEL_EXTRACTED_PATH):
+    with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
+        zip_ref.extractall(".")
 
 # Check if running locally or on cloud
 def is_local():
