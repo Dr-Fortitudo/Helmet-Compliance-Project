@@ -21,7 +21,7 @@ LABELS = ["NO Helmet", "ON. Helmet"]
 
 
 # Unzip model if not already extracted
-if not os.path.exists(MODEL_EXTRACTED_PATH):
+if not os.path.exists(MODEL_PATH):
     with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(".")
 
