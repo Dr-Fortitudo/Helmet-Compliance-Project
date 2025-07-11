@@ -97,10 +97,7 @@ def process_uploaded_image(image):
     return Image.fromarray(img_rgb), detections
 
 # Sidebar UI
-if os.path.exists(LOGO_PATH):
-    st.sidebar.image(LOGO_PATH, use_container_width=True)
-else:
-    st.sidebar.write("🪖")
+st.sidebar.image(LOGO_PATH, use_container_width=True)
 
 st.sidebar.markdown(
     """
