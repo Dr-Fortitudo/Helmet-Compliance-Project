@@ -4,3 +4,4 @@ onnxruntime
 numpy
 pandas
 Pillow
+tensorflow
