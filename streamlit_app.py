@@ -1,152 +1,103 @@
-import os
-os.environ["PYTHON_ZONEINFO_TZPATH"] = "tzdata"
-
 import streamlit as st
-import cv2
+import tensorflow as tf
 import numpy as np
-import onnxruntime as ort
+from PIL import Image
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import pandas as pd
-import base64
-import zipfile
-from PIL import Image
 
-# Streamlit page config
-st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", layout="wide")
+# Page config
+st.set_page_config(page_title="Helmet Compliance Detector", page_icon="⛑️", layout="centered")
 
-# Constants
-MODEL_ZIP_PATH = "best.zip"
-MODEL_EXTRACTED_PATH = "best.onnx"
-MODEL_PATH = "best.onnx"
-LOGO_PATH = "logo.png"
-LABELS = ["NO Helmet", "ON. Helmet"]
-
-# Unzip model if not already extracted
-if not os.path.exists(MODEL_EXTRACTED_PATH):
-    with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
-        zip_ref.extractall(".")
-
-# Load ONNX model
+# Load model
 @st.cache_resource
 def load_model():
-    session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
-    return session, session.get_inputs()[0].name
+    return tf.keras.models.load_model("model.savedmodel", compile=False)
 
-session, input_name = load_model()
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"❌ Model loading failed: {e}")
+    st.stop()
 
-# Preprocess image for ONNX model
-def preprocess(img):
-    img_resized = cv2.resize(img, (640, 640))
-    img_transposed = img_resized.transpose(2, 0, 1)
-    img_normalized = img_transposed.astype(np.float32) / 255.0
-    return np.expand_dims(img_normalized, axis=0)
+class_names = ["ON Helmet", "NO Helmet"]
 
-# Postprocess predictions
-def postprocess(outputs, threshold=0.3):
-    predictions = outputs[0][0]
-    results = []
-    for pred in predictions:
-        if len(pred) < 6:
-            continue
-        x1, y1, x2, y2, conf, cls = pred[:6]
-        if conf > threshold:
-            results.append((int(cls), float(conf), (int(x1), int(y1), int(x2), int(y2))))
-    return results
+# Preprocessing
+def preprocess(image):
+    image = image.resize((224, 224))
+    img_array = tf.keras.preprocessing.image.img_to_array(image)
+    img_array = np.expand_dims(img_array, axis=0) / 255.0
+    return img_array
 
-# Fake alarm (for Streamlit Cloud)
-def play_alarm():
-    st.warning("🚨 Violation detected! (Sound not supported on cloud)")
+# Predict
+def predict(image):
+    img_array = preprocess(image)
+    prediction = model.predict(img_array)
+    label = class_names[np.argmax(prediction)]
+    confidence = float(np.max(prediction))
+    return label, confidence
 
-# Sidebar UI
-st.sidebar.image(LOGO_PATH, use_container_width=True)
-st.sidebar.markdown(
-    """
-    <h1 style='text-align:center; color:yellow; font-size: 36px;'>CapSure</h1>
-    <h2 style='text-align:center; color:yellow; font-size: 20px;'>Real-time Helmet Compliance Detection</h2>
-    """,
-    unsafe_allow_html=True
-)
-st.sidebar.markdown("---")
-reset_trigger = st.sidebar.button("🔁 RESET", use_container_width=True)
-
-# Title
-st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
-st.markdown("---")
-
-# Init session state
-if 'history' not in st.session_state:
+# Init log
+if "history" not in st.session_state:
     st.session_state.history = []
 
-if 'violation' not in st.session_state:
-    st.session_state.violation = False
+# Title
+st.markdown("<h1 style='text-align:center;'>⛑️ Helmet Compliance Detector</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray;'>Capture or upload an image to check for helmet compliance</p>", unsafe_allow_html=True)
+st.markdown("---")
 
-# CAMERA INPUT UI
-img_file = st.camera_input("📷 Capture Image")
+# Input selector
+col1, col2 = st.columns(2)
+with col1:
+    input_type = st.selectbox("Choose Input Method", ["Upload Image", "Camera Input"])
+with col2:
+    threshold = st.slider("Confidence Threshold", 0.5, 1.0, 0.7, 0.01)
 
-if img_file and not st.session_state.violation:
-    image = Image.open(img_file)
-    frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+image = None
+filename = ""
 
-    img_input = preprocess(frame)
-    outputs = session.run(None, {input_name: img_input})
-    detections = postprocess(outputs)
+# File or camera input
+if input_type == "Upload Image":
+    uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        filename = uploaded_file.name
+elif input_type == "Camera Input":
+    camera_file = st.camera_input("📷 Capture from Camera")
+    if camera_file:
+        image = Image.open(camera_file)
+        filename = "camera_snapshot.png"
 
-    alert_triggered = False
+# Prediction & Output
+if image:
+    st.image(image, caption=filename, use_column_width=True)
 
-    for cls_id, conf, (x1, y1, x2, y2) in detections:
-        label = LABELS[cls_id]
-        color = (0, 255, 0) if label == "ON. Helmet" else (0, 0, 255)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-        if label == "NO Helmet":
-            alert_triggered = True
+    with st.spinner("🧠 Analyzing..."):
+        label, confidence = predict(image)
+        confidence_percent = confidence * 100
 
-    if alert_triggered:
-        play_alarm()
-        now = datetime.now(ZoneInfo("Asia/Kolkata"))
-        formatted_time = now.strftime("%I:%M:%S %p @ %d %B, %Y")
-        filename = f"violation_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-        _, img_encoded = cv2.imencode('.jpg', frame)
-        img_bytes = img_encoded.tobytes()
+    st.markdown("---")
 
+    if label == "ON Helmet":
+        st.success(f"✅ Worker is in compliance")
+        st.markdown(f"<p style='color:green; font-size:18px;'>Confidence: {confidence_percent:.2f}%</p>", unsafe_allow_html=True)
+    else:
+        st.error(f"❌ Worker is not wearing a helmet")
+        st.markdown(f"<p style='color:red; font-size:18px;'>Confidence: {confidence_percent:.2f}%</p>", unsafe_allow_html=True)
+
+    # Store log if confidence is high
+    if confidence >= threshold:
         st.session_state.history.insert(0, {
-            "timestamp": formatted_time,
-            "class": "NO Helmet",
-            "filename": filename,
-            "image_bytes": img_bytes
+            "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S"),
+            "result": label,
+            "confidence": f"{confidence_percent:.2f}%",
+            "image": filename
         })
 
-        st.session_state.violation = True
-        st.warning("🚨 Violation Detected! Please RESET to continue.")
-
-        st.download_button("⬇ Download Violation Snapshot", img_bytes, filename, "image/jpeg")
-
-    st.image(frame, channels="BGR", use_container_width=True)
-
-elif st.session_state.violation:
-    st.warning("❗ Detection paused. Press RESET to continue.")
-
-# RESET button
-if reset_trigger:
-    st.session_state.violation = False
-    st.rerun()
-
-# DEFECT LOG
-st.markdown("---")
-st.markdown("## 📋 Defect Log (Recent Violations)")
-
+# History
 if st.session_state.history:
-    for i, entry in enumerate(st.session_state.history):
-        cols = st.columns([2, 2, 1])
-        with cols[0]:
-            st.markdown(f"🕒 Time:** {entry['timestamp']}")
-        with cols[1]:
-            st.markdown(f"🚧 Class:** {entry['class']}")
-        with cols[2]:
-            st.download_button("Download Image", data=entry["image_bytes"],
-                               file_name=entry["filename"], mime="image/jpeg",
-                               key=f"download_{i}")
+    st.markdown("---")
+    st.markdown("### 🧾 Detection Log")
+    for entry in st.session_state.history[:5]:
+        st.markdown(f"- **{entry['timestamp']}** | `{entry['result']}` ({entry['confidence']}) — *{entry['image']}*")
 else:
-    st.info("No helmet violations recorded yet.")
+    st.info("No predictions logged yet.")
