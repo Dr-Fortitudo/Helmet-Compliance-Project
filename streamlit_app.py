@@ -1,20 +1,24 @@
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-import io
 from PIL import Image
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # Page config
-st.set_page_config(page_title="Helmet Compliance Detector", page_icon="⛑️", layout="wide")
+st.set_page_config(page_title="Helmet Compliance Detector", page_icon="⛑️", layout="centered")
 
 # Load model
 @st.cache_resource
 def load_model():
     return tf.keras.models.load_model("model.savedmodel", compile=False)
 
-model = load_model()
+try:
+    model = load_model()
+except Exception as e:
+    st.error(f"❌ Model loading failed: {e}")
+    st.stop()
+
 class_names = ["ON Helmet", "NO Helmet"]
 
 # Preprocessing
@@ -24,88 +28,76 @@ def preprocess(image):
     img_array = np.expand_dims(img_array, axis=0) / 255.0
     return img_array
 
-# Prediction
+# Predict
 def predict(image):
-    processed = preprocess(image)
-    prediction = model.predict(processed)
+    img_array = preprocess(image)
+    prediction = model.predict(img_array)
     label = class_names[np.argmax(prediction)]
     confidence = float(np.max(prediction))
     return label, confidence
 
-# Session history
-if 'helmet_log' not in st.session_state:
-    st.session_state.helmet_log = []
+# Init log
+if "history" not in st.session_state:
+    st.session_state.history = []
 
 # Title
-st.markdown("<h1 style='text-align: center; color: #3ABEFF;'>⛑️ Helmet Compliance Detector</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: grey;'>Capture or upload an image to detect helmet compliance</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align:center;'>⛑️ Helmet Compliance Detector</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;color:gray;'>Capture or upload an image to check for helmet compliance</p>", unsafe_allow_html=True)
 st.markdown("---")
 
-# Input method
+# Input selector
 col1, col2 = st.columns(2)
 with col1:
-    input_method = st.selectbox("Choose Input Method", ["Upload Image", "Camera Input"])
+    input_type = st.selectbox("Choose Input Method", ["Upload Image", "Camera Input"])
 with col2:
-    threshold = st.slider("Confidence Threshold", 0.5, 1.0, 0.8, 0.01)
+    threshold = st.slider("Confidence Threshold", 0.5, 1.0, 0.7, 0.01)
 
 image = None
 filename = ""
 
-# Input handling
-if input_method == "Upload Image":
-    uploaded = st.file_uploader("📤 Upload an image", type=["jpg", "jpeg", "png"])
-    if uploaded:
-        image = Image.open(uploaded)
-        filename = uploaded.name
-else:
-    camera_image = st.camera_input("📷 Take a picture")
-    if camera_image:
-        image = Image.open(camera_image)
-        filename = "Camera Snapshot"
+# File or camera input
+if input_type == "Upload Image":
+    uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image = Image.open(uploaded_file)
+        filename = uploaded_file.name
+elif input_type == "Camera Input":
+    camera_file = st.camera_input("📷 Capture from Camera")
+    if camera_file:
+        image = Image.open(camera_file)
+        filename = "camera_snapshot.png"
 
-# Prediction block
+# Prediction & Output
 if image:
-    col1, col2 = st.columns([1, 1.2])
-    with col1:
-        st.image(image, caption=filename, use_column_width=True)
+    st.image(image, caption=filename, use_column_width=True)
 
-    with col2:
-        with st.spinner("🧠 Analyzing..."):
-            label, confidence = predict(image)
-            confidence_percent = confidence * 100
+    with st.spinner("🧠 Analyzing..."):
+        label, confidence = predict(image)
+        confidence_percent = confidence * 100
 
-        if label == "ON Helmet":
-            st.markdown(f"""
-                <div style='background-color: #e6ffed; padding: 1.5rem; border-radius: 12px; border: 2px solid #22c55e;'>
-                    <h2 style='color: #22c55e;'>✅ COMPLIANT</h2>
-                    <p style='font-size: 1.1rem;'><strong>Confidence:</strong> {confidence_percent:.2f}%</p>
-                    <p>No safety violation detected.</p>
-                </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-                <div style='background-color: #ffeaea; padding: 1.5rem; border-radius: 12px; border: 2px solid #f87171;'>
-                    <h2 style='color: #f87171;'>⚠️ INCOMPLIANT</h2>
-                    <p style='font-size: 1.1rem;'><strong>Confidence:</strong> {confidence_percent:.2f}%</p>
-                    <p>Helmet not detected. Safety violation possible.</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-        # Log the result
-        if confidence >= threshold:
-            st.session_state.helmet_log.insert(0, {
-                "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S"),
-                "image": filename,
-                "result": label,
-                "confidence": f"{confidence_percent:.2f}%"
-            })
-
-# Detection log
-if st.session_state.helmet_log:
     st.markdown("---")
-    st.markdown("### 🧾 Detection History")
-    for log in st.session_state.helmet_log[:5]:
-        with st.expander(f"{log['timestamp']} - {log['result']} ({log['confidence']})"):
-            st.write(log)
+
+    if label == "ON Helmet":
+        st.success(f"✅ Worker is in compliance")
+        st.markdown(f"<p style='color:green; font-size:18px;'>Confidence: {confidence_percent:.2f}%</p>", unsafe_allow_html=True)
+    else:
+        st.error(f"❌ Worker is not wearing a helmet")
+        st.markdown(f"<p style='color:red; font-size:18px;'>Confidence: {confidence_percent:.2f}%</p>", unsafe_allow_html=True)
+
+    # Store log if confidence is high
+    if confidence >= threshold:
+        st.session_state.history.insert(0, {
+            "timestamp": datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S"),
+            "result": label,
+            "confidence": f"{confidence_percent:.2f}%",
+            "image": filename
+        })
+
+# History
+if st.session_state.history:
+    st.markdown("---")
+    st.markdown("### 🧾 Detection Log")
+    for entry in st.session_state.history[:5]:
+        st.markdown(f"- **{entry['timestamp']}** | `{entry['result']}` ({entry['confidence']}) — *{entry['image']}*")
 else:
-    st.info("No detections logged yet.")
+    st.info("No predictions logged yet.")
