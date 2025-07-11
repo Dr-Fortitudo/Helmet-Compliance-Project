@@ -11,17 +11,15 @@ import pandas as pd
 import base64
 import zipfile
 from PIL import Image
-import io
 
-# Config
+# Streamlit page config
 st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", layout="wide")
 
 # Constants
-MODEL_PATH = "best.onnx"
 MODEL_ZIP_PATH = "best.zip"
 MODEL_EXTRACTED_PATH = "best.onnx"
+MODEL_PATH = "best.onnx"
 LOGO_PATH = "logo.png"
-ALARM_PATH = "alarm.mp3"
 LABELS = ["NO Helmet", "ON. Helmet"]
 
 # Unzip model if not already extracted
@@ -29,7 +27,7 @@ if not os.path.exists(MODEL_EXTRACTED_PATH):
     with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(".")
 
-# Load model
+# Load ONNX model
 @st.cache_resource
 def load_model():
     session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
@@ -37,7 +35,7 @@ def load_model():
 
 session, input_name = load_model()
 
-# Preprocess image
+# Preprocess image for ONNX model
 def preprocess(img):
     img_resized = cv2.resize(img, (640, 640))
     img_transposed = img_resized.transpose(2, 0, 1)
@@ -56,11 +54,11 @@ def postprocess(outputs, threshold=0.3):
             results.append((int(cls), float(conf), (int(x1), int(y1), int(x2), int(y2))))
     return results
 
-# Alarm simulation
+# Fake alarm (for Streamlit Cloud)
 def play_alarm():
-    st.warning("🚨 Violation detected! (Alarm sound not supported in browser)")
+    st.warning("🚨 Violation detected! (Sound not supported on cloud)")
 
-# Sidebar
+# Sidebar UI
 st.sidebar.image(LOGO_PATH, use_container_width=True)
 st.sidebar.markdown(
     """
@@ -70,8 +68,11 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 st.sidebar.markdown("---")
-start_camera = st.sidebar.toggle("📷 Camera ON/OFF", value=False, key="cam_toggle")
 reset_trigger = st.sidebar.button("🔁 RESET", use_container_width=True)
+
+# Title
+st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
+st.markdown("---")
 
 # Init session state
 if 'history' not in st.session_state:
@@ -80,88 +81,72 @@ if 'history' not in st.session_state:
 if 'violation' not in st.session_state:
     st.session_state.violation = False
 
-# Title
-st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
-st.markdown("---")
+# CAMERA INPUT UI
+img_file = st.camera_input("📷 Capture Image")
 
-frame_placeholder = st.empty()
+if img_file and not st.session_state.violation:
+    image = Image.open(img_file)
+    frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-# Camera logic using st.camera_input
-if start_camera and not st.session_state.violation:
-    captured_image = st.camera_input("Capture Image")
+    img_input = preprocess(frame)
+    outputs = session.run(None, {input_name: img_input})
+    detections = postprocess(outputs)
 
-    if captured_image is not None:
-        image = Image.open(captured_image).convert("RGB")
-        frame = np.array(image)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    alert_triggered = False
 
-        img_input = preprocess(frame)
-        outputs = session.run(None, {input_name: img_input})
-        detections = postprocess(outputs)
+    for cls_id, conf, (x1, y1, x2, y2) in detections:
+        label = LABELS[cls_id]
+        color = (0, 255, 0) if label == "ON. Helmet" else (0, 0, 255)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        if label == "NO Helmet":
+            alert_triggered = True
 
-        alert_triggered = False
+    if alert_triggered:
+        play_alarm()
+        now = datetime.now(ZoneInfo("Asia/Kolkata"))
+        formatted_time = now.strftime("%I:%M:%S %p @ %d %B, %Y")
+        filename = f"violation_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+        _, img_encoded = cv2.imencode('.jpg', frame)
+        img_bytes = img_encoded.tobytes()
 
-        for cls_id, conf, (x1, y1, x2, y2) in detections:
-            label = LABELS[cls_id]
-            color = (0, 255, 0) if label == "ON. Helmet" else (0, 0, 255)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-            if label == "NO Helmet":
-                alert_triggered = True
+        st.session_state.history.insert(0, {
+            "timestamp": formatted_time,
+            "class": "NO Helmet",
+            "filename": filename,
+            "image_bytes": img_bytes
+        })
 
-        # Violation logic
-        if alert_triggered:
-            play_alarm()
-            now = datetime.now(ZoneInfo("Asia/Kolkata"))
-            formatted_time = now.strftime("%I:%M:%S %p @ %d %B, %Y")
-            filename = f"violation_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+        st.session_state.violation = True
+        st.warning("🚨 Violation Detected! Please RESET to continue.")
 
-            _, img_encoded = cv2.imencode('.jpg', frame)
-            img_bytes = img_encoded.tobytes()
+        st.download_button("⬇️ Download Violation Snapshot", img_bytes, filename, "image/jpeg")
 
-            # Save to session state
-            st.session_state.history.insert(0, {
-                "timestamp": formatted_time,
-                "class": "NO Helmet",
-                "filename": filename,
-                "image_bytes": img_bytes
-            })
+    st.image(frame, channels="BGR", use_container_width=True)
 
-            st.session_state.violation = True
-
-            st.warning("🚨 Violation Detected! Please RESET to continue.")
-            st.download_button(
-                label="⬇️ Download Violation Snapshot",
-                data=img_bytes,
-                file_name=filename,
-                mime="image/jpeg"
-            )
-
-        # Show frame with bounding boxes
-        frame_placeholder.image(frame, channels="BGR", use_container_width=True)
+elif st.session_state.violation:
+    st.warning("❗ Detection paused. Press RESET to continue.")
 
 # RESET button
 if reset_trigger:
     st.session_state.violation = False
     st.rerun()
 
-# Defect Log
+# DEFECT LOG
 st.markdown("---")
 st.markdown("## 📋 Defect Log (Recent Violations)")
 
 if st.session_state.history:
-    for idx, entry in enumerate(st.session_state.history):
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown(f"**{idx+1}.** `{entry['timestamp']}` — `{entry['class']}`")
-        with col2:
-            st.download_button(
-                label="⬇️ Download Image",
-                data=entry['image_bytes'],
-                file_name=entry['filename'],
-                mime="image/jpeg",
-                key=f"download_{idx}"
-            )
+    for i, entry in enumerate(st.session_state.history):
+        cols = st.columns([2, 2, 1])
+        with cols[0]:
+            st.markdown(f"**🕒 Time:** {entry['timestamp']}")
+        with cols[1]:
+            st.markdown(f"**🚧 Class:** {entry['class']}")
+        with cols[2]:
+            st.download_button("Download Image", data=entry["image_bytes"],
+                               file_name=entry["filename"], mime="image/jpeg",
+                               key=f"download_{i}")
 else:
     st.info("No helmet violations recorded yet.")
