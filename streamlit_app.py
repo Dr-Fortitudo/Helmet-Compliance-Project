@@ -9,7 +9,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from PIL import Image
 import zipfile
-import torch
 
 # Config
 st.set_page_config(page_title="CapSure", page_icon="🪖", layout="wide")
