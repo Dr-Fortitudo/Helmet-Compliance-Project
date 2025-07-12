@@ -68,7 +68,6 @@ st.sidebar.markdown(
     unsafe_allow_html=True
 )
 st.sidebar.markdown("---")
-reset_trigger = st.sidebar.button("🔁 RESET", use_column_width=True)
 
 # Title
 st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
