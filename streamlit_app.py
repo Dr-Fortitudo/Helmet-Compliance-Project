@@ -71,7 +71,7 @@ st.sidebar.markdown(
 )
 st.sidebar.markdown("---")
 start_camera = st.sidebar.toggle("📷 Camera ON/OFF", value=False, key="cam_toggle")
-reset_trigger = st.sidebar.button("🔁 RESET", use_column_width=True)
+reset_trigger = st.sidebar.button("🔁 RESET")
 
 # Init session state
 if 'history' not in st.session_state:
