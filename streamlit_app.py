@@ -36,20 +36,26 @@ def preprocess(img):
     return np.expand_dims(img_normalized, axis=0)
 
 # Postprocess predictions
-def postprocess(outputs, threshold=0.3):
-    predictions = outputs[0][0]
-    results = []
+def postprocess(outputs, conf_threshold=0.3):
+    predictions = outputs[0][0]  # shape: (8400, 85)
+    boxes = []
+    
     for pred in predictions:
-        if len(pred) < 6:
-            continue
-        x1, y1, x2, y2, conf, cls = pred[:6]
-        if conf > threshold:
-            results.append((
-                int(cls),
-                float(conf),
-                (int(x1), int(y1), int(x2), int(y2))
-            ))
-    return results
+        x_center, y_center, width, height = pred[0:4]
+        objectness = pred[4]
+        class_scores = pred[5:]
+        class_id = np.argmax(class_scores)
+        confidence = objectness * class_scores[class_id]
+
+        if confidence > conf_threshold:
+            # Convert from center x,y,w,h → x1,y1,x2,y2
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+            x2 = int(x_center + width / 2)
+            y2 = int(y_center + height / 2)
+            boxes.append((class_id, float(confidence), (x1, y1, x2, y2)))
+    
+    return boxes
 
 # Init session state
 if "history" not in st.session_state:
