@@ -42,15 +42,21 @@ def preprocess(img):
     return np.expand_dims(img_normalized, axis=0)
 
 def postprocess(outputs, threshold=0.3):
-    predictions = outputs[0][0]
+    predictions = outputs[0]
+
+    if isinstance(predictions, list) and len(predictions) > 0:
+        predictions = predictions[0]
+
     results = []
     for pred in predictions:
+        pred = pred.tolist()
         if len(pred) < 6:
             continue
         x1, y1, x2, y2, conf, cls = pred[:6]
         if conf > threshold:
             results.append((int(cls), float(conf), (int(x1), int(y1), int(x2), int(y2))))
     return results
+
 
 def play_alarm():
     st.warning("🚨 Violation detected! (Sound not supported on cloud)")
