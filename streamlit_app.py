@@ -34,9 +34,36 @@ def preprocess(img):
     t = img.transpose(2, 0, 1).astype(np.float32) / 255.0
     return np.expand_dims(t, axis=0), img
 
-def postprocess(output, conf_thres=0.3, iou_thres=0.4):
-    import torchvision.ops as ops  # This works in Streamlit Cloud too
+def iou(box1, box2):
+    x1, y1, x2, y2 = box1
+    x1g, y1g, x2g, y2g = box2
 
+    inter_x1 = max(x1, x1g)
+    inter_y1 = max(y1, y1g)
+    inter_x2 = min(x2, x2g)
+    inter_y2 = min(y2, y2g)
+    inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+
+    area1 = (x2 - x1) * (y2 - y1)
+    area2 = (x2g - x1g) * (y2g - y1g)
+    union_area = area1 + area2 - inter_area
+    return inter_area / union_area if union_area != 0 else 0
+
+def non_max_suppression_numpy(boxes, scores, iou_threshold=0.4):
+    indices = np.argsort(scores)[::-1]
+    keep = []
+    while indices.size > 0:
+        current = indices[0]
+        keep.append(current)
+        rest = indices[1:]
+        filtered = []
+        for i in rest:
+            if iou(boxes[current], boxes[i]) < iou_threshold:
+                filtered.append(i)
+        indices = np.array(filtered)
+    return keep
+
+def postprocess(output, conf_thres=0.3, iou_thres=0.4):
     preds = output[0]  # (num_boxes, 6+num_classes)
     boxes = []
     confidences = []
@@ -45,32 +72,30 @@ def postprocess(output, conf_thres=0.3, iou_thres=0.4):
     for det in preds:
         x_center, y_center, width, height = det[:4]
         objectness = det[4]
-        class_probs = det[5:]
-        conf = objectness * np.max(class_probs)
-        class_id = np.argmax(class_probs)
+        class_scores = det[5:]
+        class_id = np.argmax(class_scores)
+        class_prob = class_scores[class_id]
+        conf = objectness * class_prob
 
         if conf > conf_thres:
-            x1 = x_center - width / 2
-            y1 = y_center - height / 2
-            x2 = x_center + width / 2
-            y2 = y_center + height / 2
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+            x2 = int(x_center + width / 2)
+            y2 = int(y_center + height / 2)
             boxes.append([x1, y1, x2, y2])
-            confidences.append(conf)
+            confidences.append(float(conf))
             class_ids.append(class_id)
 
     if len(boxes) == 0:
         return []
 
-    boxes = torch.tensor(boxes, dtype=torch.float32)
-    scores = torch.tensor(confidences, dtype=torch.float32)
-    keep = ops.nms(boxes, scores, iou_thres)
-
+    keep_indices = non_max_suppression_numpy(np.array(boxes), np.array(confidences), iou_thres)
     results = []
-    for i in keep:
-        i = int(i)
-        box = boxes[i].numpy().astype(int)
-        results.append((class_ids[i], confidences[i], tuple(box)))
+    for i in keep_indices:
+        results.append((class_ids[i], confidences[i], tuple(boxes[i])))
+
     return results
+
 
 
 if "history" not in st.session_state:
