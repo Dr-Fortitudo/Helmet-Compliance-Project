@@ -10,8 +10,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import zipfile
 from PIL import Image
+import io
 
-# Config
+# Streamlit App Config
 st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", layout="wide")
 
 # Constants
@@ -21,12 +22,12 @@ MODEL_EXTRACTED_PATH = "best.onnx"
 LOGO_PATH = "logo.png"
 LABELS = ["NO Helmet", "ON. Helmet"]
 
-# Extract model if needed
+# Unzip ONNX model if needed
 if not os.path.exists(MODEL_EXTRACTED_PATH):
     with zipfile.ZipFile(MODEL_ZIP_PATH, 'r') as zip_ref:
         zip_ref.extractall(".")
 
-# Load model
+# Load ONNX model
 @st.cache_resource
 def load_model():
     session = ort.InferenceSession(MODEL_PATH, providers=["CPUExecutionProvider"])
@@ -34,14 +35,14 @@ def load_model():
 
 session, input_name = load_model()
 
-# Preprocess
+# Image Preprocessing
 def preprocess(img):
     img_resized = cv2.resize(img, (640, 640))
     img_transposed = img_resized.transpose(2, 0, 1)
     img_normalized = img_transposed.astype(np.float32) / 255.0
     return np.expand_dims(img_normalized, axis=0)
 
-# Postprocess
+# Model Postprocessing
 def postprocess(outputs, threshold=0.3):
     predictions = outputs[0][0]
     results = []
@@ -53,12 +54,12 @@ def postprocess(outputs, threshold=0.3):
             results.append((int(cls), float(conf), (int(x1), int(y1), int(x2), int(y2))))
     return results
 
-# Alarm simulation
+# Alarm
 def play_alarm():
     st.warning("🚨 Violation detected! (Alarm sound not supported in browser)")
 
-# Sidebar UI
-st.sidebar.image(LOGO_PATH, use_column_width=True)
+# Sidebar
+st.sidebar.image(LOGO_PATH, use_container_width=True)
 st.sidebar.markdown(
     """
     <h1 style='text-align:center; color:yellow; font-size: 36px;'>CapSure</h1>
@@ -72,14 +73,14 @@ start_camera = st.sidebar.toggle("📷 Camera ON/OFF", value=False, key="cam_tog
 reset_trigger = st.sidebar.button("🔁 RESET")
 
 # Init session state
+if 'captured_image_bytes' not in st.session_state:
+    st.session_state.captured_image_bytes = None
+
 if 'history' not in st.session_state:
     st.session_state.history = []
 
 if 'violation' not in st.session_state:
     st.session_state.violation = False
-
-if 'captured_image' not in st.session_state:
-    st.session_state.captured_image = None
 
 # Title
 st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
@@ -87,15 +88,21 @@ st.markdown("---")
 
 frame_placeholder = st.empty()
 
-# Camera input logic
+# STEP 1: Capture image if camera is on
 if start_camera and not st.session_state.violation:
-    uploaded = st.camera_input("Capture Image")
+    uploaded_image = st.camera_input("📸 Capture Image for Detection")
 
-    if uploaded is not None:
-        st.session_state.captured_image = uploaded
+    if uploaded_image is not None:
+        # Store image bytes in session state
+        st.session_state.captured_image_bytes = uploaded_image.getvalue()
+        st.success("✅ Image captured. Click below to run detection.")
 
-    if st.session_state.captured_image is not None:
-        image = Image.open(st.session_state.captured_image).convert("RGB")
+# STEP 2: Run detection only when button is clicked
+if st.session_state.captured_image_bytes and not st.session_state.violation:
+    run_detection = st.button("🧠 Run Detection")
+
+    if run_detection:
+        image = Image.open(io.BytesIO(st.session_state.captured_image_bytes)).convert("RGB")
         frame = np.array(image)
         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
@@ -114,7 +121,6 @@ if start_camera and not st.session_state.violation:
             if label == "NO Helmet":
                 alert_triggered = True
 
-        # On Violation
         if alert_triggered:
             play_alarm()
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -124,7 +130,7 @@ if start_camera and not st.session_state.violation:
             _, img_encoded = cv2.imencode('.jpg', frame)
             img_bytes = img_encoded.tobytes()
 
-            # Save in history
+            # Save to defect log
             st.session_state.history.insert(0, {
                 "timestamp": formatted_time,
                 "class": "NO Helmet",
@@ -133,8 +139,8 @@ if start_camera and not st.session_state.violation:
             })
 
             st.session_state.violation = True
-            st.warning("🚨 Violation Detected! Please RESET to continue.")
 
+            st.warning("🚨 Violation Detected! Please RESET to continue.")
             st.download_button(
                 label="⬇️ Download Violation Snapshot",
                 data=img_bytes,
@@ -142,13 +148,13 @@ if start_camera and not st.session_state.violation:
                 mime="image/jpeg"
             )
 
-        # Display frame
-        frame_placeholder.image(frame, channels="BGR", use_column_width=True)
+        # Show image with detection
+        frame_placeholder.image(frame, channels="BGR", use_container_width=True)
 
-# RESET button
+# RESET logic
 if reset_trigger:
     st.session_state.violation = False
-    st.session_state.captured_image = None
+    st.session_state.captured_image_bytes = None
     st.rerun()
 
 # Defect Log
