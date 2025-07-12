@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from PIL import Image
 import zipfile
+import torch
 
 # Config
 st.set_page_config(page_title="CapSure", page_icon="🪖", layout="wide")
@@ -33,14 +34,44 @@ def preprocess(img):
     t = img.transpose(2, 0, 1).astype(np.float32) / 255.0
     return np.expand_dims(t, axis=0), img
 
-def postprocess(outputs, thresh=0.3):
-    out = []
-    for pred in outputs[0][0]:
-        if len(pred) < 6: continue
-        x1, y1, x2, y2, conf, cls = pred[:6]
-        if conf > thresh:
-            out.append((int(cls), float(conf), (int(x1), int(y1), int(x2), int(y2))))
-    return out
+def postprocess(output, conf_thres=0.3, iou_thres=0.4):
+    import torchvision.ops as ops  # This works in Streamlit Cloud too
+
+    preds = output[0]  # (num_boxes, 6+num_classes)
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    for det in preds:
+        x_center, y_center, width, height = det[:4]
+        objectness = det[4]
+        class_probs = det[5:]
+        conf = objectness * np.max(class_probs)
+        class_id = np.argmax(class_probs)
+
+        if conf > conf_thres:
+            x1 = x_center - width / 2
+            y1 = y_center - height / 2
+            x2 = x_center + width / 2
+            y2 = y_center + height / 2
+            boxes.append([x1, y1, x2, y2])
+            confidences.append(conf)
+            class_ids.append(class_id)
+
+    if len(boxes) == 0:
+        return []
+
+    boxes = torch.tensor(boxes, dtype=torch.float32)
+    scores = torch.tensor(confidences, dtype=torch.float32)
+    keep = ops.nms(boxes, scores, iou_thres)
+
+    results = []
+    for i in keep:
+        i = int(i)
+        box = boxes[i].numpy().astype(int)
+        results.append((class_ids[i], confidences[i], tuple(box)))
+    return results
+
 
 if "history" not in st.session_state:
     st.session_state.history = []
