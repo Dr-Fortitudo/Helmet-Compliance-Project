@@ -59,7 +59,7 @@ def play_alarm():
     st.warning("🚨 Violation detected! (Alarm sound not supported in browser)")
 
 # Sidebar
-st.sidebar.image(LOGO_PATH, use_container_width=True)
+st.sidebar.image(LOGO_PATH, use_column_width=True)
 st.sidebar.markdown(
     """
     <h1 style='text-align:center; color:yellow; font-size: 36px;'>CapSure</h1>
@@ -149,7 +149,7 @@ if st.session_state.captured_image_bytes and not st.session_state.violation:
             )
 
         # Show image with detection
-        frame_placeholder.image(frame, channels="BGR", use_container_width=True)
+        frame_placeholder.image(frame, channels="BGR", use_column_width=True)
 
 # RESET logic
 if reset_trigger:
