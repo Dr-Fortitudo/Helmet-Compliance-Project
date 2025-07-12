@@ -10,52 +10,49 @@ from zoneinfo import ZoneInfo
 from PIL import Image
 import zipfile
 
-# Config
+# Streamlit config
 st.set_page_config(page_title="CapSure", page_icon="🪖", layout="wide")
+
+# Constants
 MODEL_ZIP = "best.zip"
 MODEL_ONNX = "best.onnx"
 LABELS = ["NO Helmet", "ON. Helmet"]
 
-# Extract ONNX model if not already extracted
+# Extract model if zipped
 if not os.path.exists(MODEL_ONNX) and os.path.exists(MODEL_ZIP):
     with zipfile.ZipFile(MODEL_ZIP, 'r') as z:
         z.extractall(".")
 
+# Load model
 @st.cache_resource
 def load_model():
-    s = ort.InferenceSession(MODEL_ONNX, providers=["CPUExecutionProvider"])
-    return s, s.get_inputs()[0].name
+    session = ort.InferenceSession(MODEL_ONNX, providers=["CPUExecutionProvider"])
+    return session, session.get_inputs()[0].name
 
 session, input_name = load_model()
 
 # Preprocess image
 def preprocess(img):
     img_resized = cv2.resize(img, (640, 640))
-    img_transposed = img_resized.transpose(2, 0, 1)  # HWC -> CHW
+    img_transposed = img_resized.transpose(2, 0, 1)
     img_normalized = img_transposed.astype(np.float32) / 255.0
     return np.expand_dims(img_normalized, axis=0)
 
-# Postprocess predictions
-def postprocess(outputs, conf_threshold=0.3):
-    predictions = outputs[0][0]  # shape: (8400, 85)
-    boxes = []
-    
+# Postprocess model output
+def postprocess(outputs, threshold=0.3):
+    predictions = outputs[0][0]
+    results = []
     for pred in predictions:
-        x_center, y_center, width, height = pred[0:4]
-        objectness = pred[4]
-        class_scores = pred[5:]
-        class_id = np.argmax(class_scores)
-        confidence = objectness * class_scores[class_id]
-
-        if confidence > conf_threshold:
-            # Convert from center x,y,w,h → x1,y1,x2,y2
-            x1 = int(x_center - width / 2)
-            y1 = int(y_center - height / 2)
-            x2 = int(x_center + width / 2)
-            y2 = int(y_center + height / 2)
-            boxes.append((class_id, float(confidence), (x1, y1, x2, y2)))
-    
-    return boxes
+        if len(pred) < 6:
+            continue
+        x1, y1, x2, y2, conf, cls = pred[:6]
+        if conf > threshold:
+            results.append((
+                int(cls),
+                float(conf),
+                (int(x1), int(y1), int(x2), int(y2))
+            ))
+    return results
 
 # Init session state
 if "history" not in st.session_state:
@@ -63,62 +60,66 @@ if "history" not in st.session_state:
 if "violated" not in st.session_state:
     st.session_state.violated = False
 
-# Sidebar
+# Sidebar controls
 st.sidebar.title("CapSure")
-start = st.sidebar.checkbox("Camera ON/OFF")
-if st.sidebar.button("RESET"):
+start = st.sidebar.checkbox("📷 Camera ON/OFF")
+if st.sidebar.button("🔁 RESET"):
     st.session_state.violated = False
 
-st.title("🪖 Helmet Detection")
+# Title
+st.title("🪖 Helmet Detection System")
 
+# Main logic
 if start and not st.session_state.violated:
-    img_file = st.camera_input("Capture Image")
+    img_file = st.camera_input("📸 Capture Image")
+
     if img_file:
-        img_pil = Image.open(img_file)
+        img_pil = Image.open(img_file).convert("RGB")
         frame = np.array(img_pil)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
         inp = preprocess(frame)
-
-        # Run detection
         outs = session.run(None, {input_name: inp})
-        detections = postprocess(outs)
 
-        display = frame.copy()  # <-- FIXED: this was missing
+        det = postprocess(outs)
+        display = frame.copy()
         alert = False
 
-        for clsid, conf, (x1, y1, x2, y2) in detections:
+        for clsid, conf, (x1, y1, x2, y2) in det:
             label = LABELS[clsid]
             color = (0, 255, 0) if clsid else (0, 0, 255)
             cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
             cv2.putText(display, f"{label} {conf:.2f}", (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            if label == "NO Helmet":
+            if clsid == 0:  # NO Helmet
                 alert = True
 
         st.image(display, channels="BGR")
 
         if alert:
-            st.warning("🚨 Violation Detected")
+            st.warning("🚨 Violation detected!")
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
             ts = now.strftime("%I:%M:%S %p @ %d %B, %Y")
-            fn = f"viol_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-            _, b = cv2.imencode('.jpg', display)
+            fn = f"violation_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
+            _, img_bytes = cv2.imencode('.jpg', display)
             st.session_state.history.insert(0, {
-                "ts": ts,
-                "class": "NO Helmet",
-                "bytes": b.tobytes(),
-                "fn": fn
+                "ts": ts, "class": "NO Helmet", "bytes": img_bytes.tobytes(), "fn": fn
             })
             st.session_state.violated = True
-            st.download_button("Download Snapshot", b.tobytes(), fn, mime="image/jpeg")
+            st.download_button("⬇️ Download Violation Snapshot", data=img_bytes.tobytes(), file_name=fn, mime="image/jpeg")
 
-# Defect log
-st.markdown("---\n## 📋 Defect Log")
-for idx, h in enumerate(st.session_state.history):
-    c1, c2, c3 = st.columns([2, 2, 1])
-    with c1:
-        st.write(h["ts"])
-    with c2:
-        st.write(h["class"])
-    with c3:
-        st.download_button("Download", data=h["bytes"], file_name=h["fn"],
-                           mime="image/jpeg", key=f"dl_{idx}")
+# Violation history
+st.markdown("---")
+st.subheader("📋 Defect Log (Recent Violations)")
+
+if st.session_state.history:
+    for idx, h in enumerate(st.session_state.history):
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            st.write("🕒", h["ts"])
+        with c2:
+            st.write("🪖", h["class"])
+        with c3:
+            st.download_button("Download", data=h["bytes"], file_name=h["fn"], mime="image/jpeg", key=idx)
+else:
+    st.info("No helmet violations recorded yet.")
