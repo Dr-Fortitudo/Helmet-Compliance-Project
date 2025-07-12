@@ -10,15 +10,15 @@ from zoneinfo import ZoneInfo
 from PIL import Image
 import zipfile
 
-# Streamlit config
-st.set_page_config(page_title="CapSure", page_icon="🪖", layout="wide")
+# Configuration
+st.set_page_config(page_title="CapSure - Helmet Detection", page_icon="🪖", layout="wide")
 
 # Constants
 MODEL_ZIP = "best.zip"
 MODEL_ONNX = "best.onnx"
 LABELS = ["NO Helmet", "ON. Helmet"]
 
-# Extract model if zipped
+# Extract ONNX model if not already done
 if not os.path.exists(MODEL_ONNX) and os.path.exists(MODEL_ZIP):
     with zipfile.ZipFile(MODEL_ZIP, 'r') as z:
         z.extractall(".")
@@ -38,88 +38,102 @@ def preprocess(img):
     img_normalized = img_transposed.astype(np.float32) / 255.0
     return np.expand_dims(img_normalized, axis=0)
 
-# Postprocess model output
-def postprocess(outputs, threshold=0.3):
-    predictions = outputs[0][0]
-    results = []
+# Correct postprocess for YOLOv5
+def postprocess(outputs, conf_threshold=0.3):
+    predictions = outputs[0][0]  # (8400, 85)
+    boxes = []
     for pred in predictions:
-        if len(pred) < 6:
-            continue
-        x1, y1, x2, y2, conf, cls = pred[:6]
-        if conf > threshold:
-            results.append((
-                int(cls),
-                float(conf),
-                (int(x1), int(y1), int(x2), int(y2))
-            ))
-    return results
+        x_center, y_center, width, height = pred[0:4]
+        objectness = pred[4]
+        class_scores = pred[5:]
+        class_id = np.argmax(class_scores)
+        class_conf = class_scores[class_id]
+        confidence = objectness * class_conf
 
-# Init session state
+        if confidence > conf_threshold:
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+            x2 = int(x_center + width / 2)
+            y2 = int(y_center + height / 2)
+            boxes.append((class_id, float(confidence), (x1, y1, x2, y2)))
+    return boxes
+
+# State setup
 if "history" not in st.session_state:
     st.session_state.history = []
 if "violated" not in st.session_state:
     st.session_state.violated = False
 
-# Sidebar controls
-st.sidebar.title("CapSure")
-start = st.sidebar.checkbox("📷 Camera ON/OFF")
+# UI - Sidebar
+st.sidebar.image("logo.png", use_column_width=True)
+st.sidebar.markdown(
+    "<h1 style='text-align:center; color:yellow;'>CapSure</h1><h2 style='text-align:center; color:yellow;'>Helmet Detection</h2>",
+    unsafe_allow_html=True
+)
+start = st.sidebar.toggle("📷 Camera ON/OFF")
 if st.sidebar.button("🔁 RESET"):
     st.session_state.violated = False
 
-# Title
-st.title("🪖 Helmet Detection System")
+# UI - Main
+st.title("🪖 Helmet Compliance Detection")
 
-# Main logic
 if start and not st.session_state.violated:
     img_file = st.camera_input("📸 Capture Image")
-
     if img_file:
+        # Read & convert
         img_pil = Image.open(img_file).convert("RGB")
-        frame = np.array(img_pil)
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
+        # Detection
         inp = preprocess(frame)
         outs = session.run(None, {input_name: inp})
-
         det = postprocess(outs)
-        display = frame.copy()
-        alert = False
 
+        alert = False
         for clsid, conf, (x1, y1, x2, y2) in det:
             label = LABELS[clsid]
-            color = (0, 255, 0) if clsid else (0, 0, 255)
-            cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(display, f"{label} {conf:.2f}", (x1, y1 - 10),
+            color = (0, 255, 0) if clsid == 1 else (0, 0, 255)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, f"{label} {conf:.2f}", (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            if clsid == 0:  # NO Helmet
+            if clsid == 0:
                 alert = True
 
-        st.image(display, channels="BGR")
+        # Display results
+        st.image(frame, channels="BGR", use_column_width=True)
 
         if alert:
-            st.warning("🚨 Violation detected!")
+            st.warning("🚨 Helmet Violation Detected!")
             now = datetime.now(ZoneInfo("Asia/Kolkata"))
             ts = now.strftime("%I:%M:%S %p @ %d %B, %Y")
             fn = f"violation_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-            _, img_bytes = cv2.imencode('.jpg', display)
+            _, buffer = cv2.imencode(".jpg", frame)
+
+            # Log violation
             st.session_state.history.insert(0, {
-                "ts": ts, "class": "NO Helmet", "bytes": img_bytes.tobytes(), "fn": fn
+                "ts": ts,
+                "class": "NO Helmet",
+                "bytes": buffer.tobytes(),
+                "fn": fn
             })
             st.session_state.violated = True
-            st.download_button("⬇️ Download Violation Snapshot", data=img_bytes.tobytes(), file_name=fn, mime="image/jpeg")
 
-# Violation history
+            st.download_button("⬇️ Download Snapshot", buffer.tobytes(), file_name=fn, mime="image/jpeg")
+    elif st.session_state.violated:
+        st.warning("⚠️ Detection paused due to previous violation. Click RESET to continue.")
+
+# Violation Log
 st.markdown("---")
-st.subheader("📋 Defect Log (Recent Violations)")
+st.subheader("📋 Violation Log")
 
 if st.session_state.history:
-    for idx, h in enumerate(st.session_state.history):
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            st.write("🕒", h["ts"])
-        with c2:
-            st.write("🪖", h["class"])
-        with c3:
-            st.download_button("Download", data=h["bytes"], file_name=h["fn"], mime="image/jpeg", key=idx)
+    for i, entry in enumerate(st.session_state.history):
+        cols = st.columns([3, 2, 1])
+        with cols[0]:
+            st.markdown(f"🕒 **Time:** {entry['ts']}")
+        with cols[1]:
+            st.markdown(f"🚧 **Class:** {entry['class']}")
+        with cols[2]:
+            st.download_button("Download", entry["bytes"], file_name=entry["fn"], mime="image/jpeg", key=f"dl_{i}")
 else:
-    st.info("No helmet violations recorded yet.")
+    st.info("✅ No violations recorded yet.")
