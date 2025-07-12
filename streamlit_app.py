@@ -121,19 +121,14 @@ if start_camera:
             })
     
             st.session_state.violation = True
-            st.warning("🚨 Violation Detected! Please RESET to continue.")
+            st.warning("🚨 Violation Detected!")
     
             st.download_button("⬇️ Download Violation Snapshot", img_bytes, filename, "image/jpeg")
     
         st.image(frame, channels="BGR", use_column_width=True)
     
     elif st.session_state.violation:
-        st.warning("❗ Detection paused. Press RESET to continue.")
-
-# RESET button
-if reset_trigger:
-    st.session_state.violation = False
-    st.rerun()
+        st.warning("❗ Detection paused.")
 
 # DEFECT LOG
 st.markdown("---")
