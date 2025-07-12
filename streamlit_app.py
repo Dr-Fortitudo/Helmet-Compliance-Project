@@ -39,7 +39,7 @@ def preprocess(img):
     return np.expand_dims(img_normalized, axis=0)
 
 # Correct postprocess for YOLOv5
-def postprocess(outputs, conf_threshold=0.3):
+def postprocess(outputs, conf_threshold=0.5):
     predictions = outputs[0][0]  # (8400, 85)
     boxes = []
     for pred in predictions:
