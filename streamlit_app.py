@@ -41,15 +41,10 @@ def preprocess(img):
     img_normalized = img_transposed.astype(np.float32) / 255.0
     return np.expand_dims(img_normalized, axis=0)
 
-def postprocess(outputs, threshold=0.3):
-    predictions = outputs[0]
-
-    if isinstance(predictions, list) and len(predictions) > 0:
-        predictions = predictions[0]
-
+def postprocess(outputs, threshold=0.3):  # Lowered threshold for sensitivity
+    predictions = outputs[0][0]
     results = []
     for pred in predictions:
-        pred = pred.tolist()
         if len(pred) < 6:
             continue
         x1, y1, x2, y2, conf, cls = pred[:6]
@@ -81,8 +76,8 @@ with st.sidebar:
         """, unsafe_allow_html=True
     )
     st.markdown("---")
-    start_camera = st.toggle("📷 Camera ON/OFF", key="cam_toggle")
-    reset = st.button("🔁 RESET")
+    
+start_camera = st.sidebar.toggle("📷 Camera ON/OFF", value=False, key="cam_toggle")
 
 # Main Title
 st.markdown("<h1 style='text-align:center; color:#3ABEFF;'>CapSure - Helmet Detection System</h1>", unsafe_allow_html=True)
@@ -139,12 +134,6 @@ if st.session_state.last_image and not st.session_state.violation:
 
 elif st.session_state.violation:
     st.warning("❗ Detection paused. Press RESET to continue.")
-
-# Reset
-if reset:
-    st.session_state.violation = False
-    st.session_state.last_image = None
-    st.rerun()
 
 # Defect Log
 st.markdown("---")
