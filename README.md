@@ -1,5 +1,5 @@
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
-![Platform](https://img.shields.io/badge/VS-Code%20Pi-lightgrey)
+![Platform](https://img.shields.io/badge/VS-Code%20-lightgrey)
 ![YOLO](https://img.shields.io/badge/ObjectDetection-YOLOv5-yellow)
 
 ## 🪖 Helmet Compliance Detection 🚨  
